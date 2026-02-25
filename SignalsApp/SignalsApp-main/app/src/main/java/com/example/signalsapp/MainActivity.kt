@@ -1,0 +1,255 @@
+package com.example.signalsapp
+
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent { MaterialTheme { SignalsScreen() } }
+    }
+}
+
+private enum class RecommendedEntrySort(val title: String) {
+    DEFAULT("Recommended entry (default)"),
+    LONG_SHORT_NO_TRADE("Long → Short → No trade"),
+    SHORT_LONG_NO_TRADE("Short → Long → No trade")
+}
+
+private enum class CoinSort(val title: String) {
+    NAME("Coin name (A-Z)"),
+    DAILY_SELL_VOLUME("Daily sell volume (high → low)"),
+    MARKET_CAP("Market cap (high → low)")
+}
+
+@Composable
+fun SignalsScreen() {
+    val scope = rememberCoroutineScope()
+
+    var baseUrl by remember { mutableStateOf("http://192.168.1.112:8010") }
+    var signals by remember { mutableStateOf<List<LiteSignal>>(emptyList()) }
+    var loading by remember { mutableStateOf(false) }
+    var status by remember { mutableStateOf("Ready") }
+    var recommendedSort by remember { mutableStateOf(RecommendedEntrySort.DEFAULT) }
+    var coinSort by remember { mutableStateOf(CoinSort.NAME) }
+    var selectedTimeframe by remember { mutableStateOf("All") }
+
+    fun refresh() {
+        loading = true
+        status = "Loading..."
+        val api = buildApi(baseUrl)
+
+        scope.launch {
+            try {
+                val data = withContext(Dispatchers.IO) { api.scanLite() }
+                signals = data
+                status = "Loaded: ${data.size}"
+            } catch (e: Exception) {
+                status = "Error: ${e.message ?: e.javaClass.simpleName}"
+            } finally {
+                loading = false
+            }
+        }
+    }
+
+    val timeframeOptions = remember(signals) {
+        listOf("All") + signals.mapNotNull { it.timeframe }.distinct().sorted()
+    }
+
+    val visibleSignals = remember(signals, selectedTimeframe, recommendedSort, coinSort) {
+        val timeframeFiltered = if (selectedTimeframe == "All") {
+            signals
+        } else {
+            signals.filter { it.timeframe == selectedTimeframe }
+        }
+
+        timeframeFiltered
+            .sortedWith(compareBy<LiteSignal> { recommendationRank(it.signal.orEmpty(), recommendedSort) }
+                .thenBy { coinRank(it, coinSort) })
+    }
+
+    Column(modifier = Modifier.padding(16.dp)) {
+        OutlinedTextField(
+            value = baseUrl,
+            onValueChange = { baseUrl = it.trim() },
+            label = { Text("Server URL") },
+            modifier = Modifier.fillMaxWidth(),
+            singleLine = true
+        )
+
+        Spacer(Modifier.height(8.dp))
+
+        Button(
+            onClick = { refresh() },
+            enabled = !loading,
+            modifier = Modifier.fillMaxWidth()
+        ) { Text(if (loading) "Loading..." else "Refresh") }
+
+        Spacer(Modifier.height(8.dp))
+        Text(status)
+
+        Spacer(Modifier.height(12.dp))
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            DropdownField(
+                modifier = Modifier.weight(1f),
+                label = "Entry sort",
+                selected = recommendedSort.title,
+                options = RecommendedEntrySort.entries.map { it.title },
+                onSelect = { selected ->
+                    recommendedSort = RecommendedEntrySort.entries.first { it.title == selected }
+                }
+            )
+
+            DropdownField(
+                modifier = Modifier.weight(1f),
+                label = "Coin sort",
+                selected = coinSort.title,
+                options = CoinSort.entries.map { it.title },
+                onSelect = { selected ->
+                    coinSort = CoinSort.entries.first { it.title == selected }
+                }
+            )
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        DropdownField(
+            label = "Timeframe",
+            selected = selectedTimeframe,
+            options = timeframeOptions,
+            onSelect = { selectedTimeframe = it },
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Spacer(Modifier.height(12.dp))
+
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(visibleSignals) { s ->
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(s.symbol.orEmpty(), fontWeight = FontWeight.Bold)
+                        Text("${s.signal.orEmpty()} • ${s.score ?: 0} • ${s.timeframe.orEmpty()}")
+                        Text("Recommended entry: ${s.recommendedEntryPriceLabel()}")
+                        Text(s.summary.orEmpty())
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun recommendationRank(signal: String, sort: RecommendedEntrySort): Int {
+    val normalized = signal.uppercase()
+    return when (sort) {
+        RecommendedEntrySort.DEFAULT -> 0
+        RecommendedEntrySort.LONG_SHORT_NO_TRADE -> when {
+            normalized.contains("LONG") -> 0
+            normalized.contains("SHORT") -> 1
+            else -> 2
+        }
+
+        RecommendedEntrySort.SHORT_LONG_NO_TRADE -> when {
+            normalized.contains("SHORT") -> 0
+            normalized.contains("LONG") -> 1
+            else -> 2
+        }
+    }
+}
+
+private fun coinRank(signal: LiteSignal, sort: CoinSort): Comparable<*> = when (sort) {
+    CoinSort.NAME -> signal.symbol.orEmpty()
+    CoinSort.DAILY_SELL_VOLUME -> -(signal.dailySellVolume ?: Double.NEGATIVE_INFINITY)
+    CoinSort.MARKET_CAP -> -(signal.marketCap ?: Double.NEGATIVE_INFINITY)
+}
+
+private fun LiteSignal.recommendedEntryPriceLabel(): String {
+    val zone = entry_zone
+    if (zone.isNullOrEmpty()) return "N/A"
+
+    val recommended = when {
+        signal.orEmpty().contains("LONG", ignoreCase = true) -> zone.minOrNull() ?: (price ?: 0.0)
+        signal.orEmpty().contains("SHORT", ignoreCase = true) -> zone.maxOrNull() ?: (price ?: 0.0)
+        else -> zone.average()
+    }
+
+    return "$${"%.4f".format(recommended)}"
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DropdownField(
+    label: String,
+    selected: String,
+    options: List<String>,
+    onSelect: (String) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = !expanded },
+        modifier = modifier
+    ) {
+        OutlinedTextField(
+            value = selected,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text(label) },
+            trailingIcon = {
+                ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
+            },
+            modifier = Modifier
+                .menuAnchor()
+                .fillMaxWidth()
+        )
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            options.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(option) },
+                    onClick = {
+                        onSelect(option)
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
+}
