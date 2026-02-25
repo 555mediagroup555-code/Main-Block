@@ -106,13 +106,18 @@ fun SignalsScreen() {
         val fromApi = signals
             .mapNotNull { it.timeframe }
             .map { normalizeTimeframeLabel(it) }
+            .filter { it.isNotBlank() }
             .filter { normalizedSeen.add(it.lowercase()) }
+
+        val preferredPresent = preferred.filter { preferredValue ->
+            fromApi.any { it.equals(preferredValue, ignoreCase = true) }
+        }
 
         val others = fromApi.filterNot { value ->
             preferred.any { it.equals(value, ignoreCase = true) }
         }.sorted()
 
-        listOf("All") + preferred + others
+        listOf("All") + preferredPresent + others
     }
 
     val visibleSignals = remember(signals, selectedTimeframe, recommendedSort, coinSort) {
@@ -137,6 +142,13 @@ fun SignalsScreen() {
 
     LaunchedEffect(visibleSignals, pageSize) {
         currentPage = 0
+    }
+
+
+    LaunchedEffect(timeframeOptions) {
+        if (timeframeOptions.none { it.equals(selectedTimeframe, ignoreCase = true) }) {
+            selectedTimeframe = "All"
+        }
     }
 
     val pagedSignals = remember(visibleSignals, currentPage, pageSize) {
@@ -254,13 +266,15 @@ fun SignalsScreen() {
 
 private fun normalizeTimeframeLabel(raw: String): String {
     val normalized = raw.trim().lowercase()
-    return when (normalized) {
-        "5s", "5sec", "5secs", "5second", "5seconds" -> "5s"
-        "1m", "1min", "1mins", "1minute", "1minutes" -> "1m"
-        "5m", "5min", "5mins", "5minute", "5minutes" -> "5m"
-        "15m", "15min", "15mins", "15minute", "15minutes" -> "15m"
-        "1h", "1hr", "1hour", "60m", "60min" -> "1h"
-        "4h", "4hr", "4hour", "240m", "240min" -> "4h"
+    val alphanumeric = normalized.filter { it.isLetterOrDigit() }
+
+    return when (alphanumeric) {
+        "5s", "5sec", "5secs", "5second", "5seconds", "s5", "sec5" -> "5s"
+        "1m", "1min", "1mins", "1minute", "1minutes", "m1", "min1" -> "1m"
+        "5m", "5min", "5mins", "5minute", "5minutes", "m5", "min5" -> "5m"
+        "15m", "15min", "15mins", "15minute", "15minutes", "m15", "min15" -> "15m"
+        "1h", "1hr", "1hour", "60m", "60min", "h1", "hr1" -> "1h"
+        "4h", "4hr", "4hour", "240m", "240min", "h4", "hr4" -> "4h"
         else -> raw.trim()
     }
 }
