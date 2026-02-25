@@ -14,15 +14,16 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -34,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.ceil
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -54,6 +56,12 @@ private enum class CoinSort(val title: String) {
     MARKET_CAP("Market cap (high → low)")
 }
 
+private enum class PageSize(val title: String, val value: Int) {
+    TEN("10 per page", 10),
+    TWENTY("20 per page", 20),
+    FIFTY("50 per page", 50)
+}
+
 @Composable
 fun SignalsScreen() {
     val scope = rememberCoroutineScope()
@@ -65,6 +73,8 @@ fun SignalsScreen() {
     var recommendedSort by remember { mutableStateOf(RecommendedEntrySort.DEFAULT) }
     var coinSort by remember { mutableStateOf(CoinSort.NAME) }
     var selectedTimeframe by remember { mutableStateOf("All") }
+    var pageSize by remember { mutableStateOf(PageSize.TEN) }
+    var currentPage by remember { mutableStateOf(0) }
 
     fun refresh() {
         loading = true
@@ -96,8 +106,24 @@ fun SignalsScreen() {
         }
 
         timeframeFiltered
-            .sortedWith(compareBy<LiteSignal> { recommendationRank(it.signal.orEmpty(), recommendedSort) }
-                .thenBy { coinRank(it, coinSort) })
+            .sortedWith(
+                compareBy<LiteSignal> { recommendationRank(it.signal.orEmpty(), recommendedSort) }
+                    .thenBy { coinRank(it, coinSort) }
+            )
+    }
+
+    val totalPages = remember(visibleSignals, pageSize) {
+        if (visibleSignals.isEmpty()) 1 else ceil(visibleSignals.size / pageSize.value.toDouble()).toInt()
+    }
+
+    LaunchedEffect(visibleSignals, pageSize) {
+        currentPage = 0
+    }
+
+    val pagedSignals = remember(visibleSignals, currentPage, pageSize) {
+        val from = currentPage * pageSize.value
+        val to = (from + pageSize.value).coerceAtMost(visibleSignals.size)
+        if (from in 0 until to) visibleSignals.subList(from, to) else emptyList()
     }
 
     Column(modifier = Modifier.padding(16.dp)) {
@@ -146,23 +172,58 @@ fun SignalsScreen() {
 
         Spacer(Modifier.height(8.dp))
 
-        DropdownField(
-            label = "Timeframe",
-            selected = selectedTimeframe,
-            options = timeframeOptions,
-            onSelect = { selectedTimeframe = it },
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            DropdownField(
+                label = "Timeframe",
+                selected = selectedTimeframe,
+                options = timeframeOptions,
+                onSelect = { selectedTimeframe = it },
+                modifier = Modifier.weight(1f)
+            )
+
+            DropdownField(
+                label = "Pagination",
+                selected = pageSize.title,
+                options = PageSize.entries.map { it.title },
+                onSelect = { selected ->
+                    pageSize = PageSize.entries.first { it.title == selected }
+                },
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.fillMaxWidth()
-        )
+        ) {
+            Button(
+                onClick = { currentPage = (currentPage - 1).coerceAtLeast(0) },
+                enabled = currentPage > 0,
+                modifier = Modifier.weight(1f)
+            ) { Text("Previous") }
+
+            Button(
+                onClick = { currentPage = (currentPage + 1).coerceAtMost(totalPages - 1) },
+                enabled = currentPage < totalPages - 1,
+                modifier = Modifier.weight(1f)
+            ) { Text("Next") }
+        }
+
+        Spacer(Modifier.height(8.dp))
+        Text("Page ${currentPage + 1} of $totalPages")
 
         Spacer(Modifier.height(12.dp))
 
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(visibleSignals) { s ->
+            items(pagedSignals) { s ->
                 Card(modifier = Modifier.fillMaxWidth()) {
                     Column(modifier = Modifier.padding(12.dp)) {
                         Text(s.symbol.orEmpty(), fontWeight = FontWeight.Bold)
                         Text("${s.signal.orEmpty()} • ${s.score ?: 0} • ${s.timeframe.orEmpty()}")
                         Text("Recommended entry: ${s.recommendedEntryPriceLabel()}")
+                        Text("Entry reason: ${s.entryExplanation.orEmpty().ifBlank { "N/A" }}")
                         Text(s.summary.orEmpty())
                     }
                 }
