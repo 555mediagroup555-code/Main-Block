@@ -18,9 +18,27 @@ data class LiteSignal(
     val stop_loss: Double?,
     val take_profit: List<Double>?,
     val summary: String?,
-    @SerializedName(value = "entry_explanation", alternate = ["entry_reason", "recommended_entry_reason"])
+    @SerializedName(
+        value = "entry_explanation",
+        alternate = [
+            "entry_reason",
+            "recommended_entry_reason",
+            "entryExplanation",
+            "entryReason",
+            "reason"
+        ]
+    )
     val entryExplanation: String? = null,
-    @SerializedName(value = "recommended_entry", alternate = ["recommended_entry_price", "entry_price"])
+    @SerializedName(
+        value = "recommended_entry",
+        alternate = [
+            "recommended_entry_price",
+            "entry_price",
+            "entryPrice",
+            "recommendedEntry",
+            "entry"
+        ]
+    )
     val recommendedEntryPrice: Double? = null,
     @SerializedName("daily_sell_volume")
     val dailySellVolume: Double? = null,
@@ -29,7 +47,7 @@ data class LiteSignal(
 )
 
 interface SignalsApi {
-    @GET("scan")
+    @GET("scan-lite")
     suspend fun scanLite(): List<LiteSignal>
 
     @GET("scan")
