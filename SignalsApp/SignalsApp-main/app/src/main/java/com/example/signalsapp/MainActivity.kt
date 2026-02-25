@@ -101,14 +101,27 @@ fun SignalsScreen() {
     }
 
     val timeframeOptions = remember(signals) {
-        listOf("All") + signals.mapNotNull { it.timeframe }.distinct().sorted()
+        val preferred = listOf("5s", "1m", "5m", "15m", "1h", "4h")
+        val normalizedSeen = mutableSetOf<String>()
+        val fromApi = signals
+            .mapNotNull { it.timeframe }
+            .map { normalizeTimeframeLabel(it) }
+            .filter { normalizedSeen.add(it.lowercase()) }
+
+        val others = fromApi.filterNot { value ->
+            preferred.any { it.equals(value, ignoreCase = true) }
+        }.sorted()
+
+        listOf("All") + preferred + others
     }
 
     val visibleSignals = remember(signals, selectedTimeframe, recommendedSort, coinSort) {
         val timeframeFiltered = if (selectedTimeframe == "All") {
             signals
         } else {
-            signals.filter { it.timeframe == selectedTimeframe }
+            signals.filter {
+                normalizeTimeframeLabel(it.timeframe.orEmpty()).equals(selectedTimeframe, ignoreCase = true)
+            }
         }
 
         timeframeFiltered
@@ -229,12 +242,26 @@ fun SignalsScreen() {
                         Text(s.symbol.orEmpty(), fontWeight = FontWeight.Bold)
                         Text("${s.signal.orEmpty()} • ${s.score ?: 0} • ${s.timeframe.orEmpty()}")
                         Text("Recommended entry: ${s.recommendedEntryPriceLabel()}")
-                        Text("Entry reason: ${s.entryExplanation.orEmpty().ifBlank { "N/A" }}")
+                        Text("Entry reason: ${s.entryExplanationLabel()}")
                         Text(s.summary.orEmpty())
                     }
                 }
             }
         }
+    }
+}
+
+
+private fun normalizeTimeframeLabel(raw: String): String {
+    val normalized = raw.trim().lowercase()
+    return when (normalized) {
+        "5s", "5sec", "5secs", "5second", "5seconds" -> "5s"
+        "1m", "1min", "1mins", "1minute", "1minutes" -> "1m"
+        "5m", "5min", "5mins", "5minute", "5minutes" -> "5m"
+        "15m", "15min", "15mins", "15minute", "15minutes" -> "15m"
+        "1h", "1hr", "1hour", "60m", "60min" -> "1h"
+        "4h", "4hr", "4hour", "240m", "240min" -> "4h"
+        else -> raw.trim()
     }
 }
 
@@ -263,6 +290,8 @@ private fun coinRank(signal: LiteSignal, sort: CoinSort): Comparable<*> = when (
 }
 
 private fun LiteSignal.recommendedEntryPriceLabel(): String {
+    recommendedEntryPrice?.let { return "$${"%.4f".format(it)}" }
+
     val zone = entry_zone
     if (zone.isNullOrEmpty()) return "N/A"
 
@@ -273,6 +302,16 @@ private fun LiteSignal.recommendedEntryPriceLabel(): String {
     }
 
     return "$${"%.4f".format(recommended)}"
+}
+
+private fun LiteSignal.entryExplanationLabel(): String {
+    return entryExplanation.orEmpty().ifBlank {
+        when {
+            recommendedEntryPrice != null -> "Recommended entry provided by server"
+            !entry_zone.isNullOrEmpty() -> "Entry computed from entry zone"
+            else -> "N/A"
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
