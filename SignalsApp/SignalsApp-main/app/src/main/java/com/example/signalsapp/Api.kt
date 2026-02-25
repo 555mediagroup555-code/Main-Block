@@ -18,8 +18,10 @@ data class LiteSignal(
     val stop_loss: Double?,
     val take_profit: List<Double>?,
     val summary: String?,
-    @SerializedName("entry_explanation")
+    @SerializedName(value = "entry_explanation", alternate = ["entry_reason", "recommended_entry_reason"])
     val entryExplanation: String? = null,
+    @SerializedName(value = "recommended_entry", alternate = ["recommended_entry_price", "entry_price"])
+    val recommendedEntryPrice: Double? = null,
     @SerializedName("daily_sell_volume")
     val dailySellVolume: Double? = null,
     @SerializedName("market_cap")
