@@ -83,7 +83,13 @@ fun SignalsScreen() {
 
         scope.launch {
             try {
-                val data = withContext(Dispatchers.IO) { api.scanLite() }
+                val data = withContext(Dispatchers.IO) {
+                    try {
+                        api.scanLite()
+                    } catch (_: Exception) {
+                        api.scan()
+                    }
+                }
                 signals = data
                 status = "Loaded: ${data.size}"
             } catch (e: Exception) {

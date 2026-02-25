@@ -27,8 +27,11 @@ data class LiteSignal(
 )
 
 interface SignalsApi {
-    @GET("scan")
+    @GET("scan-lite")
     suspend fun scanLite(): List<LiteSignal>
+
+    @GET("scan")
+    suspend fun scan(): List<LiteSignal>
 }
 
 fun buildApi(baseUrl: String): SignalsApi {
